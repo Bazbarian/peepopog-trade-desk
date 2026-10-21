@@ -36,6 +36,10 @@ h2{font-size:1.6rem;margin:0 0 12px;font-weight:600}
 .sub{color:var(--muted);margin:6px 0 0}
 header{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;margin-bottom:24px}
 .loader{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.viewas{flex-basis:100%;justify-content:flex-end;color:var(--muted)}
+.viewas select{font-weight:600;color:var(--ink)}
+#teamSel.ask{outline:2px solid var(--gold)}
+.viewas .ghost:hover{color:var(--ink)}
 input,select,button{font:inherit;color:inherit}
 input,select{
   background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-width:0;
@@ -145,12 +149,17 @@ footer{color:var(--muted);font-size:.85rem;margin-top:24px}
       <p class="sub">Superflex PPR dynasty values from FantasyCalc, rosters live from Sleeper.</p>
     </div>
     <div class="loader">
-      <input id="username" value="bazbarian" aria-label="Sleeper username" size="12">
+      <input id="username" placeholder="Sleeper username" aria-label="Sleeper username" size="14">
       <select id="leagueSel" class="hidden" aria-label="League"></select>
       <button id="loadBtn">Load league</button>
     </div>
+    <div class="loader viewas hidden" id="viewAs">
+      <label for="teamSel">Your team</label>
+      <select id="teamSel"></select>
+      <button class="ghost" id="copyLink">Copy link to my view</button>
+    </div>
   </header>
-  <p class="status" id="status">Enter your Sleeper username and load your league.</p>
+  <p class="status" id="status">Enter your Sleeper username and click Load league, then pick your team.</p>
 
   <nav class="tabs hidden" id="tabs" role="tablist" aria-label="Views">
     <button role="tab" data-tab="tradeSec" aria-selected="true">Trade builder</button>
@@ -258,6 +267,43 @@ function showTab(id){
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 $("sugTeam").onchange = e => renderSuggestions(+e.target.value);
 
+function store(k,v){ try{ if(v===undefined) return localStorage.getItem("pptd:"+k); localStorage.setItem("pptd:"+k,v); }catch(e){ return null; } }
+function viewURL(){
+  const u=new URL(location.href); u.search="";
+  u.searchParams.set("league",S.leagueId); u.searchParams.set("team",S.myRid);
+  return u.toString();
+}
+
+function setTeam(rid, unconfirmed){
+  S.myRid=rid;
+  const tsel=$("teamSel");
+  tsel.classList.toggle("ask", !!unconfirmed);
+  if(!unconfirmed){
+    const blank=[...tsel.options].find(o=>o.value===""); if(blank) blank.remove();
+    tsel.value=rid;
+    store("team:"+S.leagueId, rid); store("league", S.leagueId);
+    try{ history.replaceState(null,"",viewURL()); }catch(e){}
+  }
+  const others=S.rosters.filter(r=>r.roster_id!==rid);
+  const psel=$("partnerSel"); psel.textContent="";
+  others.forEach(r=>{ const o=document.createElement("option"); o.value=r.roster_id; o.textContent=teamOf(r); psel.appendChild(o); });
+  S.partnerRid = others.length ? others[0].roster_id : null;
+  S.A=[]; S.B=[];
+  const ssel=$("sugTeam"); ssel.textContent="";
+  S.rosters.forEach(r=>{ const o=document.createElement("option"); o.value=r.roster_id; o.textContent=teamOf(r)+(r.roster_id===rid?" (you)":""); ssel.appendChild(o); });
+  ssel.value=rid;
+  $("rosterH").textContent = unconfirmed ? "Roster" : `Your roster: ${teamOf(rosterById(rid))}`;
+  buildLists(); renderTrade(); renderStandings(); renderRoster(); renderPicksTable(); renderDraftOrder(); renderSuggestions(rid);
+}
+
+$("teamSel").onchange = e => { if(e.target.value){ setTeam(+e.target.value, false); status(`Viewing as ${teamOf(rosterById(S.myRid))}.`); } };
+$("copyLink").onclick = async () => {
+  const btn=$("copyLink");
+  try{ await navigator.clipboard.writeText(viewURL()); btn.textContent="Link copied"; }
+  catch(e){ prompt("Copy this link:", viewURL()); }
+  setTimeout(()=>btn.textContent="Copy link to my view", 2000);
+};
+
 $("loadBtn").onclick = loadUser;
 $("username").addEventListener("keydown", e=>{ if(e.key==="Enter") loadUser(); });
 $("leagueSel").onchange = e => loadLeague(e.target.value);
@@ -283,7 +329,7 @@ async function loadUser(){
   }catch(e){ status(e.message, true); }
 }
 
-async function loadLeague(id){
+async function loadLeague(id, wantRid){
   try{
     status("Loading rosters and trade values…");
     const [league, rosters, users, traded] = await Promise.all([
@@ -304,22 +350,23 @@ async function loadLeague(id){
     });
     S.picks.sort((a,b)=>b.value-a.value);
     buildPicks();
-    const mine = rosters.find(r=>r.owner_id===S.user.user_id);
-    S.myRid = mine ? mine.roster_id : rosters[0].roster_id;
-    const others = rosters.filter(r=>r.roster_id!==S.myRid);
-    const psel=$("partnerSel"); psel.textContent="";
-    others.forEach(r=>{ const o=document.createElement("option"); o.value=r.roster_id; o.textContent=teamOf(r); psel.appendChild(o); });
-    S.partnerRid = others.length ? others[0].roster_id : null;
-    S.A=[]; S.B=[];
     const qbs=[...S.bySleeper.values()].filter(a=>a.pos==="QB").sort((a,b)=>b.value-a.value);
     S.qbLine = qbs[23] ? qbs[23].value : 0;  // roughly a QB24, the last "starter" in a 12-team superflex
-    const ssel=$("sugTeam"); ssel.textContent="";
-    rosters.forEach(r=>{ const o=document.createElement("option"); o.value=r.roster_id; o.textContent=teamOf(r)+(r.roster_id===S.myRid?" (you)":""); ssel.appendChild(o); });
-    ssel.value=S.myRid;
+
+    // Which team is "you": a link's team, then the loaded username's roster, then this browser's last pick
+    const ids=rosters.map(r=>r.roster_id);
+    const saved=+store("team:"+id);
+    const byUser = S.user && rosters.find(r=>r.owner_id===S.user.user_id);
+    const rid = ids.includes(+wantRid) ? +wantRid : byUser ? byUser.roster_id : ids.includes(saved) ? saved : null;
+    const tsel=$("teamSel"); tsel.textContent="";
+    if(rid==null){ const o=document.createElement("option"); o.value=""; o.textContent="Choose your team…"; tsel.appendChild(o); }
+    rosters.slice().sort((a,b)=>teamOf(a).localeCompare(teamOf(b))).forEach(r=>{
+      const o=document.createElement("option"); o.value=r.roster_id; o.textContent=teamOf(r); tsel.appendChild(o); });
+    $("viewAs").classList.remove("hidden");
     $("tabs").classList.remove("hidden"); showTab(S.tab||"tradeSec");
-    buildLists(); renderTrade(); renderStandings(); renderRoster(); renderPicksTable(); renderDraftOrder(); renderSuggestions(S.myRid);
-    const missing = mine ? "" : " Couldn’t match your account to a roster, so the first team is shown as yours.";
-    status(`${league.name}: ${teams} teams, ${S.season} season.${missing}`, !mine);
+    S.leagueId=id;
+    setTeam(rid ?? ids[0], rid==null);
+    status(rid==null ? `${league.name} loaded. Choose your team above so “you” means you.` : `${league.name}: ${teams} teams, ${league.season} season.`, false);
     $("foot").textContent = `Values: FantasyCalc dynasty, superflex, PPR, ${teams} teams; picks adjusted by projected slot. Rosters: Sleeper. Loaded ${new Date().toLocaleString()}.`;
   }catch(e){ status(e.message, true); }
 }
@@ -545,6 +592,14 @@ function renderRoster(){
   });
   t.appendChild(tb);
 }
+
+// Start-up: a shared link (?league=…&team=…), a ?user= link, or whatever this browser loaded last
+(function init(){
+  const q=new URLSearchParams(location.search);
+  const league=q.get("league") || (!q.get("user") && store("league"));
+  if(q.get("user")){ $("username").value=q.get("user"); loadUser(); }
+  else if(league){ loadLeague(league, q.get("team")); }
+})();
 
 // ---------- Suggestions ----------
 // How many players at each spot actually matter for a superflex starting lineup (approximate)
