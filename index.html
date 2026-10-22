@@ -213,6 +213,29 @@ td.wrap{white-space:normal;min-width:16ch}
 .games .lbl{color:var(--muted);font-size:.9rem}
 .tagline{color:var(--muted);font-size:.86rem;font-weight:500}
 
+/* player profile */
+dialog.profile{border:0;padding:0;border-radius:10px;width:min(720px, calc(100% - 24px));max-height:calc(100% - 24px);
+  background:var(--surface);color:var(--ink);box-shadow:0 24px 64px rgba(10,15,20,.28)}
+dialog.profile::backdrop{background:rgba(12,16,20,.5)}
+.pf-head{display:flex;gap:12px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid var(--line)}
+.pf-head h2{margin:0;font-size:1.4rem;letter-spacing:-.015em}
+.pf-head .sub{color:var(--muted);margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pf-head .iconbtn{margin-left:auto}
+.pf-body{padding:4px 20px 20px}
+.pf-body .stats{padding:14px 0}
+.verdictbox{border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.verdictbox b{font-size:1.1rem;letter-spacing:-.01em}
+.verdictbox.now b{color:var(--te)} .verdictbox.later b{color:var(--wr)} .verdictbox.both b{color:var(--accent)} .verdictbox.depth b{color:var(--muted)}
+.verdictbox ul{margin:8px 0 0;padding-left:18px;color:var(--muted)}
+.verdictbox li{margin:3px 0}
+.verdictbox .fit{margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line);font-weight:500}
+.chart{display:block;width:100%;height:auto}
+.chart text{font:11px "Public Sans",system-ui,sans-serif;fill:var(--faint)}
+.chart-note{color:var(--faint);font-size:.85rem;margin:6px 0 0}
+.chart-legend{display:flex;gap:16px;color:var(--faint);font-size:.85rem;margin-top:4px}
+.chart-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.pf-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+footer a{color:inherit}
 footer{color:var(--faint);font-size:.84rem;margin-top:32px;max-width:72ch}
 </style>
 </head>
@@ -324,14 +347,14 @@ footer{color:var(--faint);font-size:.84rem;margin-top:32px;max-width:72ch}
 
     <section class="view hidden" id="v-waivers">
       <div class="vh"><h2>Waiver gems</h2>
-        <p class="lede">Unrostered players that FantasyCalc still values, best first. Players it doesn’t track won’t appear, so this is a shortlist, not the whole wire.</p></div>
+        <p class="lede">Unrostered players that FantasyCalc still values, best first. Players it doesn’t track won’t appear, so this is a shortlist, not the whole wire. Click a player for their profile.</p></div>
       <div class="toolbar"><div class="seg" id="wfBtns" role="group" aria-label="Position"></div></div>
       <div class="panel" id="waiverTable"></div>
     </section>
 
     <section class="view hidden" id="v-roster">
       <div class="vh"><h2 id="rosterH">Roster and picks</h2>
-        <p class="lede">Click a player or pick to put it on the trade block. Players at the age where dynasty value usually starts to slide are flagged (RB 26+, WR 28+, TE 29+, QB 32+).</p></div>
+        <p class="lede">Click a player to open their profile, or a pick to put it on the trade block. Players at the age where dynasty value usually starts to slide are flagged (RB 26+, WR 28+, TE 29+, QB 32+).</p></div>
       <div class="panel" id="rosterTable"></div>
       <h3 class="sub-h">Draft picks</h3>
       <div class="panel" id="pickTable"></div>
@@ -340,6 +363,7 @@ footer{color:var(--faint);font-size:.84rem;margin-top:32px;max-width:72ch}
     <footer id="foot"></footer>
   </main>
 </div>
+<dialog class="profile" id="playerDlg" aria-labelledby="pfName"></dialog>
 <script>
 "use strict";
 const SLEEPER = "https://api.sleeper.app/v1";
@@ -367,7 +391,7 @@ const $ = id => document.getElementById(id);
 const fmt = n => Math.round(n).toLocaleString();
 const signed = n => (n>0?"+":n<0?"−":"") + fmt(Math.abs(n));
 const pct = x => x>=0.995 && x<1 ? ">99%" : x>0 && x<0.005 ? "<1%" : Math.round(x*100)+"%";
-const ord = n => n+({1:"st",2:"nd",3:"rd"}[n]||"th");
+const ord = n => n + (n%100>=11 && n%100<=13 ? "th" : ({1:"st",2:"nd",3:"rd"}[n%10]||"th"));
 const pad = n => String(n).padStart(2,"0");
 const sumV = arr => arr.reduce((s,a)=>s+a.value,0);
 const rec3 = x => `${x.w}-${x.l}${x.t?"-"+x.t:""}`;
@@ -492,15 +516,18 @@ async function loadLeague(id, wantRid){
     status("Loading trade values…");
     const vals=await getJSON(`https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=2&numTeams=${teams}&ppr=1`);
     Object.assign(S, {leagueId:id, league, rosters, traded:traded||[], state, teamName:{}, pastName:{},
-      bySleeper:new Map(), index:new Map(), picks:[], chainP:null, grades:null, gradesP:null, games:null, rivalsP:null, rivalUid:null});
+      bySleeper:new Map(), index:new Map(), picks:[], wp:null, chainP:null, grades:null, gradesP:null, games:null, rivalsP:null, rivalUid:null});
     users.forEach(u=>{ S.teamName[u.user_id]=(u.metadata && u.metadata.team_name) || u.display_name; });
     vals.forEach(v=>{
       const p=v.player||{};
       const a={id:p.sleeperId?"p"+p.sleeperId:"k"+p.id, sid:p.sleeperId?String(p.sleeperId):null, name:p.name, pos:p.position,
-        age:p.maybeAge, team:p.maybeTeam, value:v.value||0, trend:v.trend30Day||0};
+        age:p.maybeAge, team:p.maybeTeam, value:v.value||0, trend:v.trend30Day||0, posRank:v.positionRank, overall:v.overallRank};
       if(p.position==="PICK") S.picks.push(a);
       else if(a.sid){ S.bySleeper.set(a.sid, a); S.index.set(a.id, a); }
     });
+    // Fill in ranks from value order if FantasyCalc leaves them out
+    const ranked=[...S.bySleeper.values()].sort((a,b)=>b.value-a.value), seen={};
+    ranked.forEach((a,i)=>{ seen[a.pos]=(seen[a.pos]||0)+1; if(a.overall==null) a.overall=i+1; if(a.posRank==null) a.posRank=seen[a.pos]; });
     const qbs=[...S.bySleeper.values()].filter(a=>a.pos==="QB").sort((a,b)=>b.value-a.value);
     S.qbLine = qbs[23] ? qbs[23].value : 0;   // roughly QB24: the last starter in a 12-team superflex
 
@@ -523,7 +550,9 @@ async function loadLeague(id, wantRid){
     setTeam(rid ?? ids[0], rid==null);
     showView(S.view);
     status(rid==null ? "Choose your team in the top bar so everything here is from your side." : "");
-    $("foot").textContent = `Rosters, results and transactions from Sleeper. Values from FantasyCalc (dynasty, superflex, PPR, ${teams} teams), with picks adjusted for projected slot. Loaded ${new Date().toLocaleString()}.`;
+    mount("foot", `Rosters, results and transactions from Sleeper. Trade values from `,
+      el("a",{href:"https://fantasycalc.com", target:"_blank", rel:"noopener", text:"FantasyCalc.com"}),
+      ` (dynasty, superflex, PPR, ${teams} teams), with picks adjusted for projected slot. Loaded ${new Date().toLocaleString()}.`);
   }catch(e){ status(e.message, true); }
 }
 
@@ -996,7 +1025,7 @@ function renderWaivers(){
     {label:"Value", num:true, render:a=>fmt(a.value)},
     {label:"30 days", num:true, render:a=>el("span",{class:a.trend>0?"pos-good":a.trend<0?"pos-bad":"muted", text:a.trend?signed(a.trend):"–"})},
     {label:"", render:a=>me && S.confirmed && a.pos===me.need ? el("span",{class:"tagline", text:"Fills your thinnest spot"}) : ""},
-  ], rows, {empty:"No unrostered players with value at this position."}));
+  ], rows, {onRow:a=>openPlayer(a), empty:"No unrostered players with value at this position."}));
 }
 
 // ---------- roster and picks ----------
@@ -1012,7 +1041,7 @@ function renderRoster(){
     {label:"Value", key:"value", num:true, render:a=>fmt(a.value)},
     {label:"30 days", key:"trend", num:true, render:a=>el("span",{class:a.trend>0?"pos-good":a.trend<0?"pos-bad":"muted", text:a.trend?signed(a.trend):"–"})},
     {label:"", render:a=>isSelling(a)?el("span",{class:"flag", text:"Sell window"}):""},
-  ], list, {sort:S.sort, onSort, onRow:addToBlock}));
+  ], list, {sort:S.sort, onSort, onRow:a=>openPlayer(a)}));
   const picks=(S.ownedPicks[S.myRid]||[]).slice().sort((a,b)=>a.season-b.season||a.round-b.round||a.slot-b.slot);
   mount("pickTable", table([
     {label:"Pick", render:a=>`${a.season} ${ord(a.round)}`},
@@ -1020,6 +1049,158 @@ function renderRoster(){
     {label:"Projected slot", render:a=>a.projected?`${a.round}.${pad(a.slot)}`:el("span",{class:"muted", text:"Too early to say"})},
     {label:"Value", num:true, render:a=>fmt(a.value)},
   ], picks, {onRow:addToBlock, empty:"No draft picks on this roster."}));
+}
+
+
+// ---------- player profile ----------
+// Typical productive prime by position, and where FantasyCalc's position ranks stop being weekly starters
+const PRIME={QB:[24,33], RB:[22,26], WR:[23,29], TE:[24,30]};
+const START_LINE={QB:24, RB:30, WR:40, TE:12}, ELITE_LINE={QB:6, RB:8, WR:12, TE:4};
+const NS="http://www.w3.org/2000/svg";
+function svg(tag, attrs, ...kids){ const e=document.createElementNS(NS,tag); for(const [k,v] of Object.entries(attrs||{})) e.setAttribute(k,v); kids.forEach(k=>e.append(typeof k==="string"?document.createTextNode(k):k)); return e; }
+const shortDate = d => d.toLocaleDateString(undefined,{month:"short", day:"numeric"});
+
+// Daily snapshots saved by the repo's GitHub Action (data/history.json); missing when run locally
+function loadHistory(){
+  if(!S.histP) S.histP=fetch("data/history.json",{cache:"no-cache"}).then(r=>r.ok?r.json():null).catch(()=>null);
+  return S.histP;
+}
+// Every rostered player's points each completed week, in this league's scoring
+function weeklyPoints(){
+  if(S.wp) return S.wp;
+  const m={};
+  S.played.forEach(w=>w.rows.forEach(r=>{
+    const st=new Set((r.starters||[]).map(String));
+    Object.entries(r.players_points||{}).forEach(([pid,pts])=>(m[pid] ||= []).push({week:w.week, pts:+pts||0, started:st.has(pid)}));
+  }));
+  S.wp=m; return m;
+}
+function ppgRank(a){
+  const list=[];
+  Object.entries(weeklyPoints()).forEach(([pid,g])=>{
+    const p=S.bySleeper.get(pid), played=g.filter(x=>x.pts!==0);
+    if(p && p.pos===a.pos && played.length>=2) list.push({pid, avg:played.reduce((s,x)=>s+x.pts,0)/played.length});
+  });
+  list.sort((x,y)=>y.avg-x.avg);
+  const i=list.findIndex(x=>x.pid===a.sid);
+  return i<0 ? null : {rank:i+1, of:list.length};
+}
+function playerVerdict(a){
+  const [lo,hi]=PRIME[a.pos]||[23,29], pr=a.posRank, age=a.age, n=S.rosters.length;
+  const starter=pr!=null && pr<=START_LINE[a.pos], elite=pr!=null && pr<=ELITE_LINE[a.pos];
+  const left = age!=null ? hi-age : null, reasons=[];
+  if(pr!=null) reasons.push(elite ? `Valued as the ${a.pos}${pr}, a top-tier starter.`
+    : starter ? `Valued as the ${a.pos}${pr}, a weekly starter in a ${n}-team superflex league.`
+    : `Valued as the ${a.pos}${pr}, outside the usual starting tier.`);
+  if(age!=null){
+    const prime=`the usual ${a.pos} prime (about ${lo} to ${hi})`;
+    reasons.push(age<lo ? `At ${age.toFixed(1)}, he hasn’t reached ${prime} yet.`
+      : age<=hi-2 ? `At ${age.toFixed(1)}, he’s in ${prime} with a few good years left.`
+      : age<=hi ? `At ${age.toFixed(1)}, he’s near the end of ${prime}, when dynasty value tends to start falling.`
+      : `At ${age.toFixed(1)}, he’s past ${prime}, so his value is mostly about this season.`);
+  }
+  if(Math.abs(a.trend)>=100) reasons.push(`${a.trend>0?"Up":"Down"} ${fmt(Math.abs(a.trend))} in value over the last 30 days.`);
+  let kind, label;
+  if(starter && left!=null && left>=3){ kind="both"; label="Cornerstone: helps now and later"; }
+  else if(starter){ kind="now"; label="Win-now piece"; }
+  else if(left!=null && left>=3 && (a.value>=1500 || a.trend>0)){ kind="later"; label="Rebuild piece"; }
+  else { kind="depth"; label="Depth"; }
+  return {kind, label, reasons};
+}
+function teamFit(v, rid, whose){
+  const p=leagueProfiles().ps.find(x=>x.rid===rid); if(!p) return null;
+  const c=p.mode==="contend";
+  const advice={
+    both:"Keep. He fits any timeline.",
+    now: c ? "Keep. He helps win now." : "Sell candidate. Contenders will pay more for him than he’s worth to a rebuild.",
+    later: c ? "Trade chip. Package him for help this season." : "Keep. He fits the timeline.",
+    depth:"Depth. Fine as a throw-in to balance a trade."}[v.kind];
+  return `For ${whose} (${c?"contending":"rebuilding"}): ${advice}`;
+}
+
+function valueChart(points){
+  const W=640, H=200, P={l:54, r:14, t:12, b:28};
+  const vs=points.map(p=>p.v), min=Math.min(...vs), max=Math.max(...vs), padV=(max-min)*.15 || Math.max(50, max*.05);
+  const lo=Math.max(0,min-padV), hi=max+padV, t0=+points[0].d, t1=+points[points.length-1].d;
+  const x=d=>P.l+(t1===t0?.5:(+d-t0)/(t1-t0))*(W-P.l-P.r), y=v=>P.t+(1-(v-lo)/(hi-lo))*(H-P.t-P.b);
+  const line=points.map((p,i)=>`${i?"L":"M"}${x(p.d).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+  const last=points[points.length-1];
+  const s=svg("svg",{viewBox:`0 0 ${W} ${H}`, class:"chart", role:"img", "aria-label":`Trade value went from ${fmt(points[0].v)} on ${shortDate(points[0].d)} to ${fmt(last.v)} on ${shortDate(last.d)}.`});
+  for(let i=0;i<=3;i++){ const v=lo+(hi-lo)*i/3, yy=y(v).toFixed(1);
+    s.append(svg("line",{x1:P.l, x2:W-P.r, y1:yy, y2:yy, stroke:"var(--line)"}), svg("text",{x:P.l-8, y:+yy+4, "text-anchor":"end"}, fmt(v))); }
+  s.append(svg("path",{d:`${line}L${x(last.d).toFixed(1)},${H-P.b}L${x(points[0].d).toFixed(1)},${H-P.b}Z`, fill:"var(--accent)", "fill-opacity":".08"}),
+    svg("path",{d:line, fill:"none", stroke:"var(--accent)", "stroke-width":"2", "stroke-linejoin":"round", "stroke-linecap":"round"}));
+  if(points.length<=40) points.forEach(p=>s.append(svg("circle",{cx:x(p.d).toFixed(1), cy:y(p.v).toFixed(1), r:p===last?3.5:2, fill:"var(--accent)"})));
+  else s.append(svg("circle",{cx:x(last.d).toFixed(1), cy:y(last.v).toFixed(1), r:3.5, fill:"var(--accent)"}));
+  s.append(svg("text",{x:P.l, y:H-8}, shortDate(points[0].d)), svg("text",{x:W-P.r, y:H-8, "text-anchor":"end"}, shortDate(last.d)));
+  return s;
+}
+function pointsChart(games){
+  const W=640, H=160, P={l:34, r:10, t:14, b:24}, weeks=Math.max(...games.map(g=>g.week), ...S.played.map(w=>w.week));
+  const max=Math.max(10,...games.map(g=>g.pts))*1.1, bw=(W-P.l-P.r)/Math.max(weeks,1);
+  const y=v=>P.t+(1-v/max)*(H-P.t-P.b);
+  const scored=games.filter(g=>g.pts!==0), avg=scored.length?scored.reduce((s,g)=>s+g.pts,0)/scored.length:0;
+  const s=svg("svg",{viewBox:`0 0 ${W} ${H}`, class:"chart", role:"img", "aria-label":`Weekly fantasy points, averaging ${avg.toFixed(1)}.`});
+  [0, max/2].forEach(v=>s.append(svg("line",{x1:P.l, x2:W-P.r, y1:y(v).toFixed(1), y2:y(v).toFixed(1), stroke:"var(--line)"}), svg("text",{x:P.l-6, y:y(v)+4, "text-anchor":"end"}, String(Math.round(v)))));
+  for(let wk=1; wk<=weeks; wk++){
+    const g=games.find(x=>x.week===wk), cx=P.l+(wk-.5)*bw;
+    if(g){ const top=y(Math.max(0,g.pts));
+      s.append(svg("rect",{x:(cx-bw*.32).toFixed(1), y:top.toFixed(1), width:(bw*.64).toFixed(1), height:Math.max(1,H-P.b-top).toFixed(1), rx:"2", fill:g.started?"var(--accent)":"var(--line-strong)"}));
+      if(bw>26) s.append(svg("text",{x:cx, y:top-4, "text-anchor":"middle"}, g.pts.toFixed(1))); }
+    s.append(svg("text",{x:cx, y:H-8, "text-anchor":"middle"}, String(wk)));
+  }
+  if(avg) s.append(svg("line",{x1:P.l, x2:W-P.r, y1:y(avg).toFixed(1), y2:y(avg).toFixed(1), stroke:"var(--ink)", "stroke-dasharray":"4 4", "stroke-opacity":".5"}));
+  return s;
+}
+
+function closePlayer(){ const d=$("playerDlg"); if(d.close) d.close(); else d.removeAttribute("open"); }
+$("playerDlg").addEventListener("click", e=>{ if(e.target===e.currentTarget) closePlayer(); });
+function openPlayer(a){
+  const dlg=$("playerDlg");
+  const ownerR=S.rosters.find(r=>(r.players||[]).map(String).includes(a.sid));
+  const onMine=ownerR && ownerR.roster_id===S.myRid;
+  const v=playerVerdict(a), games=(weeklyPoints()[a.sid]||[]).slice().sort((x,y)=>x.week-y.week);
+  const scored=games.filter(g=>g.pts!==0), avg=scored.length?scored.reduce((s,g)=>s+g.pts,0)/scored.length:null, rk=ppgRank(a);
+  const fit = ownerR ? teamFit(v, ownerR.roster_id, onMine?"your team":teamOf(ownerR)) : (S.confirmed ? teamFit(v, S.myRid, "your team") : null);
+  const stat=(val,label)=>el("div",{}, el("b",{class:"num"}, val), el("span",{text:label}));
+  const chartBox=el("div",{}, el("p",{class:"chart-note", text:"Loading value history…"}));
+  dlg.textContent="";
+  dlg.append(
+    el("div",{class:"pf-head"},
+      el("div",{}, el("h2",{id:"pfName", text:a.name}),
+        el("div",{class:"sub"}, posTag(a.pos), el("span",{text:`${a.team||"Free agent"}${a.age!=null?`, age ${a.age.toFixed(1)}`:""}${ownerR?`, on ${teamOf(ownerR)}${onMine?" (you)":""}`:", unrostered"}`}))),
+      el("button",{class:"iconbtn", "aria-label":"Close", text:"×", onclick:closePlayer})),
+    el("div",{class:"pf-body"},
+      el("div",{class:"stats"},
+        stat(fmt(a.value),"Trade value"), stat(a.overall?"#"+a.overall:"–","Overall rank"), stat(a.posRank?a.pos+a.posRank:"–","Position rank"),
+        stat(el("span",{class:a.trend>0?"pos-good":a.trend<0?"pos-bad":"", text:a.trend?signed(a.trend):"–"}),"Last 30 days")),
+      el("div",{class:"verdictbox "+v.kind},
+        el("b",{text:v.label}),
+        el("ul",{}, v.reasons.map(r=>el("li",{text:r})),
+          avg!=null ? el("li",{text:`Averaging ${avg.toFixed(1)} points a game in this league’s scoring (${scored.length} game${scored.length>1?"s":""} on a roster)${rk?`, ${ord(rk.rank)} of ${rk.of} rostered ${a.pos}s`:""}.`}) : null),
+        fit ? el("p",{class:"fit", text:fit}) : null),
+      el("h3",{class:"sub-h", text:"Trade value over time"}), chartBox,
+      games.length ? el("h3",{class:"sub-h", text:`${S.league.season} weekly points`}) : null,
+      games.length ? pointsChart(games) : null,
+      games.length ? el("div",{class:"chart-legend"}, el("span",{}, el("i",{style:"background:var(--accent)"}), "Started"), el("span",{}, el("i",{style:"background:var(--line-strong)"}), "Benched"), el("span",{text:"Dashed line: average"})) : null,
+      el("div",{class:"pf-actions"},
+        onMine ? el("button",{class:"btn primary", text:"Add to what you send", onclick:()=>{ closePlayer(); addToBlock(a); }})
+        : ownerR && S.confirmed ? el("button",{class:"btn primary", text:`Ask ${teamOf(ownerR)} for him`, onclick:()=>{ closePlayer(); S.partnerRid=ownerR.roster_id; $("partnerSel").value=ownerR.roster_id; buildLists(); S.B=[a]; renderTrade(); showView("trade",true); }})
+        : null,
+        el("button",{class:"btn", text:"Close", onclick:closePlayer}))));
+  if(dlg.showModal && !dlg.open) dlg.showModal(); else dlg.setAttribute("open","");
+  loadHistory().then(h=>{
+    const today=new Date(), pts=[];
+    if(h && h.values && h.values[a.sid]) h.dates.forEach((d,i)=>{ const val=h.values[a.sid][i]; if(val!=null) pts.push({d:new Date(d+"T12:00:00"), v:val}); });
+    const monthAgo=new Date(Date.now()-30*864e5);
+    if(!pts.length || pts[0].d>monthAgo) pts.unshift({d:monthAgo, v:Math.max(0,a.value-a.trend), est:true});
+    if(pts[pts.length-1].d.toDateString()!==today.toDateString()) pts.push({d:today, v:a.value});
+    const daily=pts.filter(p=>!p.est).length;
+    chartBox.textContent="";
+    chartBox.append(valueChart(pts), el("p",{class:"chart-note", text: daily>=7
+      ? `Daily snapshots of FantasyCalc values saved by this site since ${shortDate(pts.find(p=>!p.est).d)}.`
+      : "FantasyCalc doesn’t share value history with outside sites, so this site saves a snapshot every day. Until that builds up, the chart starts from the value 30 days ago."}));
+  });
 }
 
 // ---------- league history (shared by trade grades and rivalries) ----------

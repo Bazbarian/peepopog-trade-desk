@@ -1,0 +1,29 @@
+name: Daily value snapshot
+
+on:
+  schedule:
+    - cron: "17 14 * * *"   # once a day, 14:17 UTC (early morning Pacific)
+  workflow_dispatch:         # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Save today's FantasyCalc values
+        run: node scripts/snapshot-values.mjs
+        env:
+          NUM_TEAMS: "12"     # match the number of teams in the league
+      - name: Commit the snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
+          git add data/history.json
+          git diff --staged --quiet || git commit -m "Daily value snapshot"
+          git push
